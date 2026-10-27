@@ -450,6 +450,7 @@ const VEHICLE_FIELDS = [
 ];
 
 const PAY_MODES = ['Virement', 'Chèque', 'Espèces', 'Carte bancaire', 'Financement'];
+const OLD_PENALTIES = 'Clients professionnels : en cas de retard de paiement, pénalités au taux de 3 fois le taux d’intérêt légal et indemnité forfaitaire de 40 € pour frais de recouvrement (art. L441-10 du Code de commerce). Pas d’escompte pour paiement anticipé.';
 const PAY_OPTS = [['especes', 'Espèces'], ['cheque', 'Chèque'], ['virement', 'Virement']];
 /* Règlement en deux temps, comme sur les anciennes factures : acompte et solde, chacun coché Espèces, Chèque ou Virement. */
 function payInfo(doc) {
@@ -482,9 +483,10 @@ const DEFAULT_SETTINGS = {
     email: 'speedski@orange.fr',
     web: 'www.vvpassionspeedski.fr',
     contact: 'Serge Smolenski',
-    siret: '792 392 151 00017', tva: 'FR84 792 392 151', legal: 'SARL', iban: '', bic: '', bank: '',
+    siret: '792 392 151 00017', ape: '4511Z', tva: 'FR84 792 392 151', legal: 'SARL',
+    iban: 'FR76 1027 8035 2500 0205 5530 159', bic: 'CMCIFR2A', bank: 'CCM du Bassin Potassique, Wittelsheim',
   },
-  rev: 2,
+  rev: 3,
   numbering: {
     withYear: true,
     devis: { prefix: 'DEV', next: 1, year: 0 },
@@ -507,7 +509,9 @@ const DEFAULT_SETTINGS = {
     facture: 'Paiement à réception de facture.',
     reparation: 'Paiement à réception de facture. Les pièces remplacées sont tenues à votre disposition sur demande.',
     achat: 'Le vendeur certifie être le propriétaire du véhicule désigné ci-dessus et déclare qu’il n’est grevé d’aucun gage ni opposition. Le véhicule est cédé dans l’état où il se trouve, avec sa carte grise barrée, signée et datée, et le certificat de cession.',
-    penalties: 'Clients professionnels : en cas de retard de paiement, pénalités au taux de 3 fois le taux d’intérêt légal et indemnité forfaitaire de 40 € pour frais de recouvrement (art. L441-10 du Code de commerce). Pas d’escompte pour paiement anticipé.',
+    reserve: 'La société reste propriétaire de la marchandise livrée à compter du jour de livraison jusqu’à complet paiement de l’intégralité du prix de vente, les risques de la marchandise incombant néanmoins au destinataire, dès la mise à disposition de celle-ci. Ne constitue pas des paiements, la remise de traites ou de tous titres créant une obligation de payer. En conséquence, en cas de non-paiement, la société est en droit d’effectuer ou de faire effectuer la reprise de la marchandise à la charge du destinataire.',
+    penalties: 'Aucun escompte n’est accordé pour paiement anticipé. En cas de retard de paiement, l’indemnité forfaitaire de recouvrement est fixée à 40 € et les pénalités de retard calculées sur la base de 3 fois le taux de l’intérêt légal.',
+    thanks: 'Nous vous remercions de votre confiance',
   },
 };
 
@@ -814,7 +818,7 @@ function renderDocumentPDF(doc, settings, extra) {
   const RULE = cream ? [206, 199, 176] : [214, 214, 208];
   const PANEL = cream ? [234, 226, 202] : [246, 242, 230];
   const LIGHT = cream ? CREAM : [255, 255, 255];
-  const ML = 16, MR = 194, CW = MR - ML, LIMIT = 278.5;
+  const ML = 16, MR = 194, CW = MR - ML, LIMIT = 277.5;
   const pdf = new MiniPDF.Doc({ bg: PAGE });
   pdf.addImage('Logo', PDF_ASSETS.LOGO);
   if (S.pdf.illustration) pdf.addImage('Mtn', PDF_ASSETS.MTN);
@@ -1052,12 +1056,14 @@ function renderDocumentPDF(doc, settings, extra) {
   // Mentions
   const mentions = [];
   const base = (doc.conditions != null ? doc.conditions : S.mentions[doc.type]) || '';
-  if (base.trim()) mentions.push(base.trim());
-  if (totals.hasMarge && doc.type !== 'achat') mentions.push('Régime particulier – Biens d’occasion : TVA sur la marge (art. 297 A du CGI), non récupérable par l’acheteur.');
-  if (franchise && doc.type !== 'achat') mentions.push('TVA non applicable, art. 293 B du CGI.');
-  if (isInvoice && (S.mentions.penalties || '').trim()) mentions.push(S.mentions.penalties.trim());
+  if (base.trim()) mentions.push([base.trim(), 'R']);
+  if (totals.hasMarge && doc.type !== 'achat') mentions.push(['Régime particulier – Biens d’occasion : TVA sur la marge (art. 297 A du CGI), non récupérable par l’acheteur.', 'R']);
+  if (franchise && doc.type !== 'achat') mentions.push(['TVA non applicable, art. 293 B du CGI.', 'R']);
+  // Mentions obligatoires des factures, en italique comme sur les factures habituelles
+  if (isInvoice && (S.mentions.reserve || '').trim()) mentions.push([S.mentions.reserve.trim(), 'I']);
+  if (isInvoice && (S.mentions.penalties || '').trim()) mentions.push([S.mentions.penalties.trim(), 'I']);
   const mLines = [];
-  for (const m of mentions) { mLines.push(...wrap(m, 'R', 7.8, CW)); mLines.push(null); }
+  for (const [m, f] of mentions) { wrap(m, f, 7.8, CW).forEach((t) => mLines.push([t, f])); mLines.push(null); }
   if (mLines.length) mLines.pop();
   const mH = mLines.reduce((h, t) => h + (t === null ? 1.6 : 3.45), 0);
   if (mLines.length) {
@@ -1065,7 +1071,7 @@ function renderDocumentPDF(doc, settings, extra) {
     for (const t of mLines) {
       if (t === null) { y += 1.6; continue; }
       if (y > LIMIT) newPage();
-      pdf.text(t, ML, y, { size: 7.8, color: MUTED }); y += 3.45;
+      pdf.text(t[0], ML, y, { size: 7.8, color: t[1] === 'I' ? INK : MUTED, font: t[1] }); y += 3.45;
     }
     y += 5;
   }
@@ -1096,17 +1102,18 @@ function renderDocumentPDF(doc, settings, extra) {
   }
 
   // Pied de page sur chaque page
-  const legal1 = [C.name, [C.address, [C.zip, C.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join('  ·  ');
-  const legal2 = [C.legal, C.siret ? 'SIRET ' + C.siret : '', C.tva ? 'TVA intracom. ' + C.tva : ''].filter(Boolean).join('  ·  ');
-  const legal3 = (C.iban || '').trim() && doc.type !== 'achat' ? ['Réf. bancaires' + (C.bank ? ' : ' + C.bank : ''), 'IBAN ' + C.iban, C.bic ? 'BIC ' + C.bic : ''].filter(Boolean).join('  ·  ') : '';
+  const legal1 = [C.legal, C.siret ? 'N° SIRET : ' + C.siret : '', C.ape ? 'Code APE : ' + C.ape : '', C.tva ? 'N° TVA intracommunautaire : ' + C.tva : ''].filter(Boolean).join('  ·  ') || [C.name, C.city].filter(Boolean).join('  ·  ');
+  const legal2 = doc.type !== 'achat' && ((C.iban || '').trim() || (C.bank || '').trim()) ? [C.bank ? 'Réf. bancaires : ' + C.bank : '', C.iban ? 'IBAN : ' + C.iban : '', C.bic ? 'BIC : ' + C.bic : ''].filter(Boolean).join('  ·  ') : '';
+  const thanks = doc.type !== 'achat' ? (S.mentions.thanks || '').trim().toUpperCase() : '';
   const total = pdf.pages.length;
   pdf.pages.forEach((p, i) => {
     pdf.p = p;
-    pdf.line(ML, 282, MR, 282, { color: RULE, lw: 0.3 });
-    pdf.text(legal1, 105, 285.6, { size: 7, color: MUTED, align: 'center' });
-    if (legal2) pdf.text(legal2, 105, 289, { size: 7, color: MUTED, align: 'center' });
-    if (legal3) pdf.text(legal3, 105, legal2 ? 292.4 : 289, { size: 7, color: MUTED, align: 'center' });
-    if (total > 1) pdf.text(`${i + 1}/${total}`, MR, 285.6, { size: 7, color: MUTED, align: 'right' });
+    pdf.line(ML, 281.5, MR, 281.5, { color: RULE, lw: 0.3 });
+    let fy = 285.1;
+    pdf.text(legal1, 105, fy, { size: 7, color: MUTED, align: 'center' }); fy += 3.4;
+    if (legal2) { pdf.text(legal2, 105, fy, { size: 7, color: MUTED, align: 'center' }); fy += 3.4; }
+    if (thanks) pdf.text(thanks, 105, fy + 0.5, { size: 7.6, font: 'BI', color: INK, align: 'center' });
+    if (total > 1) pdf.text(`${i + 1}/${total}`, MR, 295, { size: 6.8, color: MUTED, align: 'right' });
   });
   return pdf.output({ title: `${T.title} ${number}`, author: C.name });
 }
@@ -1477,6 +1484,7 @@ function buildDocXlsx(doc, settings) {
   if (base.trim()) mentions.push(base.trim());
   if (t.hasMarge && doc.type !== 'achat') mentions.push('Régime particulier – Biens d’occasion : TVA sur la marge (art. 297 A du CGI), non récupérable par l’acheteur.');
   if (franchise && doc.type !== 'achat') mentions.push('TVA non applicable, art. 293 B du CGI.');
+  if (isInv && (settings.mentions.reserve || '').trim()) mentions.push(settings.mentions.reserve.trim());
   if (isInv && (settings.mentions.penalties || '').trim()) mentions.push(settings.mentions.penalties.trim());
   for (const m of mentions) { const lnb = Math.max(1, Math.ceil(m.length / 118)); const r = put([{ v: m, s: st.mention }], 11.5 * lnb + 4); merge('A' + r, 'F' + r); }
   if (T.sign) {
@@ -1488,12 +1496,13 @@ function buildDocXlsx(doc, settings) {
     put([], 46);
   }
   put([], 16);
-  const legal1 = [C.name, [C.address, [C.zip, C.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')].filter(Boolean).join('  ·  ');
-  const legal2 = [C.legal, C.siret ? 'SIRET ' + C.siret : '', C.tva ? 'TVA intracom. ' + C.tva : ''].filter(Boolean).join('  ·  ');
+  const legal1 = [C.legal, C.siret ? 'N° SIRET : ' + C.siret : '', C.ape ? 'Code APE : ' + C.ape : '', C.tva ? 'N° TVA intracommunautaire : ' + C.tva : ''].filter(Boolean).join('  ·  ') || C.name;
+  const legal2 = '';
   const bt = { border: { top: { color: RULE } } };
   let r = put([{ v: legal1, s: Object.assign({}, st.foot, bt) }, { s: bt }, { s: bt }, { s: bt }, { s: bt }, { s: bt }], 16); merge('A' + r, 'F' + r);
   if (legal2) { r = put([{ v: legal2, s: st.foot }], 13); merge('A' + r, 'F' + r); }
-  if ((C.iban || '').trim() && doc.type !== 'achat') { r = put([{ v: ['Réf. bancaires' + (C.bank ? ' : ' + C.bank : ''), 'IBAN ' + C.iban, C.bic ? 'BIC ' + C.bic : ''].filter(Boolean).join('  ·  '), s: st.foot }], 13); merge('A' + r, 'F' + r); }
+  if (doc.type !== 'achat' && ((C.iban || '').trim() || (C.bank || '').trim())) { r = put([{ v: [C.bank ? 'Réf. bancaires : ' + C.bank : '', C.iban ? 'IBAN : ' + C.iban : '', C.bic ? 'BIC : ' + C.bic : ''].filter(Boolean).join('  ·  '), s: st.foot }], 13); merge('A' + r, 'F' + r); }
+  if (doc.type !== 'achat' && (settings.mentions.thanks || '').trim()) { r = put([{ v: settings.mentions.thanks.trim().toUpperCase(), s: { font: { sz: 8.5, b: 1, i: 1, color: INK }, align: { h: 'center' } } }], 15); merge('A' + r, 'F' + r); }
   put([], 10);
   // Images : logo à gauche, montagnes collées au coin haut droit
   const images = [{ name: 'Logo', data: dataUriBytes(UI_LOGO), col: 0, row: 1, dx: 2, dy: 0, w: 82, h: 82 }];
@@ -1631,6 +1640,13 @@ if (typeof module !== 'undefined') module.exports = { MiniXLSX, buildDocXlsx, bu
     if ((saved && saved.rev || 1) < 2) {
       for (const k of ['contact', 'siret', 'tva', 'legal']) if (!(m.company[k] || '').trim()) m.company[k] = DEFAULT_SETTINGS.company[k];
       m.rev = 2;
+    }
+    if ((saved && saved.rev || 1) < 3) {
+      const D = DEFAULT_SETTINGS.company;
+      for (const k of ['ape', 'bic', 'bank']) if (!(m.company[k] || '').trim()) m.company[k] = D[k];
+      if (!ibanValid(m.company.iban)) m.company.iban = D.iban;
+      if (!(m.mentions.penalties || '').trim() || m.mentions.penalties === OLD_PENALTIES) m.mentions.penalties = DEFAULT_SETTINGS.mentions.penalties;
+      m.rev = 3;
     }
     return m;
   }
@@ -2007,6 +2023,7 @@ if (typeof module !== 'undefined') module.exports = { MiniXLSX, buildDocXlsx, bu
       <div class="card"><h2>Mentions légales et banque</h2><div class="grid r2">
         ${sField('SIRET', 'company.siret', { attrs: 'inputmode="numeric"' })}
         ${sField('N° TVA intracom.', 'company.tva', { attrs: 'autocapitalize="characters"' })}
+        ${sField('Code APE', 'company.ape', { attrs: 'autocapitalize="characters"' })}
         ${sField('Forme juridique, capital, RCS', 'company.legal', { full: true, hint: 'Pour une SARL : capital social et ville du RCS, indiqués sur le Kbis. Exemple : SARL au capital de 10 000 € · RCS Mulhouse 792 392 151' })}
         ${sField('IBAN', 'company.iban', { full: true, attrs: 'autocapitalize="characters"', hint: `<span id="iban-hint">${ibanHint(st.company.iban)}</span>` })}
         ${sField('BIC', 'company.bic', { attrs: 'autocapitalize="characters"' })}
@@ -2036,7 +2053,9 @@ if (typeof module !== 'undefined') module.exports = { MiniXLSX, buildDocXlsx, bu
         ${sField('Facture', 'mentions.facture', { area: true, rows: 2 })}
         ${sField('Réparation', 'mentions.reparation', { area: true })}
         ${sField('Achat de véhicule', 'mentions.achat', { area: true, rows: 4 })}
-        ${sField('Pénalités de retard (factures)', 'mentions.penalties', { area: true, rows: 4 })}
+        ${sField('Réserve de propriété (toujours sur les factures)', 'mentions.reserve', { area: true, rows: 6 })}
+        ${sField('Escompte et pénalités (toujours sur les factures)', 'mentions.penalties', { area: true, rows: 3 })}
+        ${sField('Remerciement en bas de page', 'mentions.thanks')}
       </div><p class="note">Ces textes sont repris sur chaque nouveau document ; vous pouvez les modifier document par document.</p></div>
       ${!IN_CLAUDE && !INSTALLED ? `<div class="card"><h2>Installer sur le téléphone</h2>
         <p class="note" style="margin-top:0;font-size:14.5px;color:var(--ink-2)"><b>iPhone :</b> dans Safari, touchez le bouton Partager puis « Sur l’écran d’accueil ». <b>Android :</b> menu ⋮ puis « Installer l’application ».</p>
