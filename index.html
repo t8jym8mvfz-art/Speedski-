@@ -292,6 +292,7 @@ a.btn.primary { color: var(--on-red); }
 #ed-cession .checks .check { min-height: 46px; line-height: 1.3; padding-block: 8px; }
 .warn-note { color: var(--warn); background: var(--warn-bg); border-radius: 10px; padding: 10px 12px; }
 .ok-note { color: var(--ok); }
+@media (max-width: 600px) { #ed-cession .cg .field > span:first-child { min-height: 2.7em; display: flex; align-items: flex-end; } }
 
 .sig-prev { border: 1px dashed var(--line); border-radius: 12px; background: #fff; min-height: 110px; display: grid; place-items: center; overflow: hidden; }
 .sig-prev img { max-height: 120px; max-width: 100%; }
@@ -1641,8 +1642,8 @@ function cessionInfo(doc, settings) {
     siret: pick('siret', ''),
     num: pick('num', ad.num), ext: pick('ext', ad.ext), voie: pick('voie', ad.type), nomVoie: pick('nomVoie', ad.nom),
     marque: pick('marque', model ? marque : ''),
-    d2: pick('d2', ''),
-    genre: pick('genre', ''),
+    d2: String(v.d2 || '').trim(),
+    genre: String(v.genre || '').trim(),
     d3: pick('d3', model ? d3 : ''),
     formule: pick('formule', ''),
     ciDate: pick('ciDate', ''),
@@ -2420,6 +2421,8 @@ if (typeof module !== 'undefined') module.exports = { parseAddress, splitName, c
 
   function openEditor(doc, isNew) {
     doc.pay = payInfo(doc);
+    doc.vehicle = doc.vehicle || {};
+    if (doc.cession) for (const k of ['d2', 'genre']) { if (doc.cession[k] && !doc.vehicle[k]) doc.vehicle[k] = doc.cession[k]; delete doc.cession[k]; }
     ED.doc = doc; ED.isNew = !!isNew; ED.orig = isNew ? '' : JSON.stringify(doc); ED.suggest = false; ED.vOpen = null;
     let el = $('#editor');
     if (!el) { el = document.createElement('div'); el.id = 'editor'; el.className = 'editor'; document.body.appendChild(el); bindEditor(el); }
@@ -2545,11 +2548,11 @@ if (typeof module !== 'undefined') module.exports = { parseAddress, splitName, c
     return `<h2>Certificat de cession</h2>
       <p class="note" style="margin-top:0">Le Cerfa 15776*02 officiel est rempli avec ce bon d’achat : véhicule, vendeur, date et heure de la cession, et ${esc(S.settings.company.name)} comme nouveau propriétaire. À imprimer en deux exemplaires, puis à signer par le vendeur et par vous, avec le tampon.</p>
       <h3 class="subhead">Carte grise</h3>
-      <div class="grid r2">
+      <div class="grid r2 cg">
         ${fld('Marque (D.1)', 'marque', { attrs: 'autocapitalize="characters"' })}
         ${fld('Dénomination commerciale (D.3)', 'd3', { attrs: 'autocapitalize="characters"' })}
-        ${fld('Type, variante, version (D.2)', 'd2', { attrs: 'autocapitalize="characters"', ph: 'Ex. SHCCXDB3' })}
-        ${fld('Genre national (J.1)', 'genre', { attrs: 'autocapitalize="characters" list="dl-genre"', ph: 'VASP, VP, CTTE…' })}
+        ${edField('Type, variante, version (D.2)', 'vehicle.d2', { ph: 'Ex. SHCCXDB3', attrs: 'autocapitalize="characters" class="upper"' })}
+        ${edField('Genre national (J.1)', 'vehicle.genre', { ph: 'VASP, VP, CTTE…', attrs: 'autocapitalize="characters" class="upper" list="dl-genre"' })}
         ${oldFormat ? fld('Date de la carte grise (I)', 'ciDate', { type: 'date', hint: 'Ancien format d’immatriculation (123 AB 45)' }) : fld('N° de formule', 'formule', { attrs: 'autocapitalize="characters"', ph: '2018AB12345', hint: 'Sur le 1er volet de la carte grise (11 caractères)' })}
       </div>
       <div class="checks" style="margin-top:10px">${chk('ciAbsent', 'Le vendeur n’a pas la carte grise')}</div>
@@ -2578,10 +2581,19 @@ if (typeof module !== 'undefined') module.exports = { parseAddress, splitName, c
       ${missing.length ? `<p class="note warn-note">Encore vide sur le certificat : ${missing.join(', ')}. Vous pouvez aussi compléter à la main après impression.</p>` : '<p class="note ok-note">Toutes les informations du certificat sont renseignées.</p>'}
       <button class="btn primary block" style="margin-top:12px" data-act="ed-cerfa">${ic('docs')} Créer le certificat de cession</button>`;
   }
+  /* Met à jour la carte sans reconstruire ses boutons (sinon un clic en cours serait perdu) */
   function refreshCession() {
     const box = $('#ed-cession'); if (!box || !ED.doc) return;
-    if (box.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
-    box.innerHTML = cessionHTML();
+    const tmp = document.createElement('div'); tmp.innerHTML = cessionHTML();
+    const shape = (root) => [...root.querySelectorAll('input, button')].map((e) => e.dataset.cs || e.dataset.f || (e.dataset.act || '') + (e.dataset.k || '') + (e.dataset.v || '')).join('|');
+    const editing = box.contains(document.activeElement) && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    if (shape(tmp) !== shape(box)) { if (!editing) box.innerHTML = tmp.innerHTML; return; }
+    const cur = box.querySelectorAll('input'), nxt = tmp.querySelectorAll('input');
+    nxt.forEach((inp, k) => { const c = cur[k]; if (c && c !== document.activeElement && c.value !== inp.value) c.value = inp.value; });
+    const n1 = box.querySelectorAll('p.note'), n2 = tmp.querySelectorAll('p.note');
+    if (n1.length === n2.length) n1.forEach((n, k) => { if (n.outerHTML !== n2[k].outerHTML) n.replaceWith(n2[k].cloneNode(true)); });
+    const b1 = box.querySelectorAll('button'), b2 = tmp.querySelectorAll('button');
+    b2.forEach((bt, k) => { if (b1[k] && b1[k].getAttribute('aria-pressed') !== bt.getAttribute('aria-pressed')) b1[k].setAttribute('aria-pressed', bt.getAttribute('aria-pressed')); });
   }
   function payHTML() {
     const d = ED.doc, T = TYPES[d.type];
@@ -2968,6 +2980,7 @@ if (typeof module !== 'undefined') module.exports = { parseAddress, splitName, c
       const t = e.target, d = ED.doc; if (!d) return;
       if (t.dataset.f) {
         setPath(d, t.dataset.f, t.value);
+        $$(`#editor [data-f="${t.dataset.f}"]`).forEach((o) => { if (o !== t && o.value !== t.value) o.value = t.value; });
         if (t.dataset.f === 'client.name') {
           d.clientId = d.clientId && S.clients.get(d.clientId) && S.clients.get(d.clientId).name === t.value ? d.clientId : '';
           ED.suggest = true; refreshSuggest();
@@ -3007,6 +3020,11 @@ if (typeof module !== 'undefined') module.exports = { parseAddress, splitName, c
         d.vehicle.immat = v; t.value = v;
       }
       if (f === 'vehicle.vin') { d.vehicle.vin = t.value.toUpperCase().replace(/\s+/g, ''); t.value = d.vehicle.vin; }
+      if (f === 'vehicle.d2' || f === 'vehicle.genre') {
+        const k = f.split('.')[1];
+        d.vehicle[k] = t.value.toUpperCase().trim();
+        $$(`#editor [data-f="${f}"]`).forEach((o) => { o.value = d.vehicle[k]; });
+      }
       if (f === 'vehicle.modele') {
         const vl = d.lines.find((l) => l.kind === 'vehicule' && !l.label.trim());
         if (vl && d.type !== 'achat') { vl.label = t.value; renderEditor(); }
